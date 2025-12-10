@@ -1,34 +1,71 @@
-const fp = require('fastify-plugin')
+const fp = require('fastify-plugin');
+const fastifyJwt = require('@fastify/jwt');
 
-async function dbConnector(fastify, options) {
-    // Giả lập kết nối database
-    const mockDb = {
-        query: async (sql) => {
-            console.log(`Query: ${sql}`)
-            return { rows: [] }
+async function jwtPlugin(fastify, options) {
+    // Đăng ký fastify-jwt
+    fastify.register(fastifyJwt, {
+        secret: {
+            private: process.env.JWT_SECRET,
+            public: process.env.JWT_SECRET
         },
-        connect: async () => {
-            console.log('Đã kết nối database')
-            return true
+        sign: {
+            expiresIn: process.env.JWT_EXPIRES_IN || '24h'
         },
-        disconnect: async () => {
-            console.log('Đã ngắt kết nối database')
-            return true
+        verify: {
+            maxAge: process.env.JWT_EXPIRES_IN || '24h'
         }
-    }
+    });
 
-    // Thêm db vào fastify instance
-    fastify.decorate('db', mockDb)
+    // Decorate fastify instance với các helper methods
+    fastify.decorate('authenticate', async function(request, reply) {
+        try {
+            await request.jwtVerify();
+        } catch (err) {
+            reply.send(err);
+        }
+    });
 
-    // Kết nối database khi server khởi động
-    fastify.addHook('onReady', async () => {
-        await mockDb.connect()
-    })
+    fastify.decorate('generateTokens', function(user) {
+        const accessToken = fastify.jwt.sign(
+            {
+                id: user.id,
+                email: user.email,
+                role: user.role
+            },
+            {
+                expiresIn: process.env.JWT_EXPIRES_IN || '24h'
+            }
+        );
 
-    // Đóng kết nối khi server dừng
-    fastify.addHook('onClose', async () => {
-        await mockDb.disconnect()
-    })
+        const refreshToken = fastify.jwt.sign(
+            {
+                id: user.id,
+                type: 'refresh'
+            },
+            {
+                secret: process.env.JWT_REFRESH_SECRET,
+                expiresIn: process.env.JWT_REFRESH_EXPIRES_IN || '7d'
+            }
+        );
+
+        return { accessToken, refreshToken };
+    });
+
+    fastify.decorate('verifyRefreshToken', async function(token) {
+        try {
+            const decoded = fastify.jwt.verify(token, {
+                secret: process.env.JWT_REFRESH_SECRET
+            });
+
+            if (decoded.type !== 'refresh') {
+                throw new Error('Invalid token type');
+            }
+
+            return decoded;
+        } catch (err) {
+            throw new Error('Invalid refresh token');
+        }
+    });
 }
 
-module.exports = fp(dbConnector)
+module.exports = fp(jwtPlugin);

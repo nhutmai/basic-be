@@ -1,7 +1,7 @@
 const fastify = require('fastify')({
     logger: true
 })
-const dbPlugin = require('./plugins/database')
+const dbPlugin = require('./plugins/jwt')
 fastify.register(dbPlugin)
 // Import routes
 const homeRoutes = require('./routes/home')
